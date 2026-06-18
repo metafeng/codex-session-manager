@@ -566,7 +566,7 @@ async function openStatsModal() {
   els.statsModalBody.innerHTML = `<div class="stats-loading">正在汇总本机会话...</div>`;
   els.statsSubtitle.textContent = "Token 消耗与 Skill 使用频率";
   try {
-    const response = await fetch("/api/analytics");
+    const response = await fetch("api/analytics");
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || "统计载入失败");
     renderAnalytics(data);
@@ -801,7 +801,7 @@ async function selectSession(id) {
   els.detailBody.classList.remove("is-hidden");
   els.detailTitle.textContent = "正在载入会话...";
 
-  const response = await fetch(`/api/sessions/${id}`);
+  const response = await fetch(`api/sessions/${id}`);
   const detail = await response.json();
   if (!response.ok) throw new Error(detail.error || "会话载入失败");
 
@@ -820,7 +820,7 @@ async function loadSessions() {
   els.refreshButton.disabled = true;
   els.refreshButton.textContent = "刷新中";
   try {
-    const response = await fetch("/api/sessions");
+    const response = await fetch("api/sessions");
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || "会话列表载入失败");
     state.sessions = data.sessions;
