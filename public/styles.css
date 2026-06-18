@@ -922,17 +922,20 @@ code {
 .message {
   display: grid;
   gap: 7px;
+  min-width: 0;
   max-width: 86%;
 }
 
 .message-user {
   justify-self: end;
-  max-width: min(620px, 82%);
+  width: min(620px, 82%);
+  max-width: 100%;
 }
 
 .message-assistant {
   justify-self: start;
-  max-width: min(760px, 88%);
+  width: min(760px, 88%);
+  max-width: 100%;
 }
 
 .message-event {
@@ -970,6 +973,8 @@ code {
 
 .message-body {
   margin: 0;
+  min-width: 0;
+  max-width: 100%;
   color: #33322e;
   font-size: 13px;
   line-height: 1.58;
@@ -1036,6 +1041,7 @@ code {
 }
 
 .markdown-body pre {
+  max-width: 100%;
   overflow: auto;
   margin: 0;
   border-radius: 8px;

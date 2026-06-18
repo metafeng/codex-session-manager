@@ -701,7 +701,7 @@ function renderTurn(turn) {
             <span>用户</span>
             <time>${escapeHtml(fmtDate(turn.user.timestamp))}</time>
           </div>
-          <div class="message-body">${renderMarkdown(turn.user.text)}</div>
+          <div class="message-body markdown-body">${renderMarkdown(turn.user.text)}</div>
         </article>
       ` : ""}
       ${renderProcess(turn.process_events || [], turn.process_summary || {})}
@@ -742,7 +742,7 @@ function renderTimeline(messages, processEvents, summary, turns = []) {
           <span>${escapeHtml(role === "assistant" ? "" : roleLabel)}</span>
           <time>${escapeHtml(fmtDate(item.timestamp))}</time>
         </div>
-        <div class="message-body ${role === "assistant" ? "markdown-body" : ""}">${renderMarkdown(item.text)}</div>
+        <div class="message-body ${role === "assistant" || role === "user" ? "markdown-body" : ""}">${renderMarkdown(item.text)}</div>
       </article>
     `;
     })

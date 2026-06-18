@@ -59,6 +59,34 @@ function preserveText(value, max = 4000) {
   return text.length > max ? `${text.slice(0, max - 1)}...` : text;
 }
 
+function extractTaggedBlock(text, tag) {
+  const match = String(text || "").match(new RegExp(`<${tag}(?:\\s[^>]*)?>\\n?([\\s\\S]*?)\\n?<\\/${tag}>`));
+  return match?.[1]?.trim() || "";
+}
+
+function bridgeUserInputText(text) {
+  const raw = String(text || "");
+  if (!raw.includes("<user_input>")) return raw;
+
+  const userInput = extractTaggedBlock(raw, "user_input");
+  if (!userInput) return raw;
+
+  try {
+    const parsed = JSON.parse(userInput);
+    if (typeof parsed === "string") return parsed;
+    if (typeof parsed?.text === "string" && parsed.text.trim()) return parsed.text;
+  } catch {
+    // Keep the raw <user_input> payload when it is not valid JSON.
+  }
+
+  return userInput;
+}
+
+function visibleMessageText(role, text) {
+  if (role !== "user") return text;
+  return bridgeUserInputText(text);
+}
+
 function sourceInfo(source, originator, threadSource) {
   if (originator) {
     return {
@@ -529,7 +557,8 @@ async function parseRollout(path, lineLimit = 1200) {
     if (event.type === "response_item") {
       const payload = event.payload || {};
       if (payload.type === "message" && ["user", "assistant"].includes(payload.role)) {
-        const text = preserveText(textFromContent(payload.content), payload.role === "assistant" ? 6000 : 4000);
+        const rawText = textFromContent(payload.content);
+        const text = preserveText(visibleMessageText(payload.role, rawText), payload.role === "assistant" ? 6000 : 4000);
         if (payload.role === "assistant" && payload.phase === "commentary") {
           pushProcess(processEvents, {
             kind: "agent",
