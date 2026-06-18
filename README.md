@@ -1,0 +1,111 @@
+# Codex 会话管理器
+
+一个本地只读的 Codex session 可视化管理器，用来浏览 Codex Desktop、Codex CLI、`codex exec` 以及归档会话记录。
+
+它会读取本机 `~/.codex` 下的 session、日志和 rollout JSONL 文件，帮助你快速找到历史会话、复制恢复命令、查看对话过程、分析 Token 消耗和 Skill 使用频率。
+
+## 功能
+
+- 会话列表：按更新时间浏览本机 Codex 会话。
+- 多维筛选：支持按来源、模型服务商、时间、重要性、归档状态筛选。
+- 自定义日期：可以用系统日期选择器按起止日期精确过滤会话。
+- 会话恢复：一键复制 `codex resume <session-id> --all` 命令。
+- 对话复现：按一轮一轮的用户提问、处理过程、最终回复展示历史会话。
+- 处理过程折叠：每轮回复里的工具调用、Skill、执行结果可以展开或收起。
+- Markdown 渲染：支持标题、列表、代码块、表格、引用、行内公式和块级公式。
+- 技术索引：查看 rollout 文件、Token、日志数量、JSONL 行数、推理强度等信息。
+- 会话重要性判断：用本地启发式规则标记“非常重要 / 重要 / 有用 / 不重要”。
+- 用量统计弹窗：汇总累计 Token、单会话峰值、Token 活动热力图、最长任务、Skill 使用频率。
+
+## 安装要求
+
+- macOS 或其他可访问 Codex 本地数据目录的系统
+- Node.js 18 或更高版本
+- `sqlite3` 命令行工具
+- 本机已有 Codex 使用记录，默认读取 `~/.codex`
+
+检查依赖：
+
+```bash
+node --version
+sqlite3 --version
+```
+
+## 安装和运行
+
+克隆仓库：
+
+```bash
+git clone git@github.com:metafeng/codex-session-manager.git
+cd codex-session-manager
+```
+
+启动本地服务：
+
+```bash
+npm start
+```
+
+打开浏览器：
+
+```text
+http://127.0.0.1:8787/
+```
+
+默认端口是 `8787`。如果需要换端口：
+
+```bash
+PORT=8899 npm start
+```
+
+## 数据来源
+
+默认读取：
+
+```text
+~/.codex/state_5.sqlite
+~/.codex/logs_2.sqlite
+~/.codex/sessions/**/*.jsonl
+~/.codex/archived_sessions/*.jsonl
+```
+
+如果你使用自定义 Codex 数据目录，可以设置 `CODEX_HOME`：
+
+```bash
+CODEX_HOME=/path/to/.codex npm start
+```
+
+## 安全边界
+
+这个项目只读取本机 Codex 数据，不会修改、归档、删除任何 session。
+
+不会上传你的会话内容到远端。GitHub 仓库只包含管理器代码，不包含 `~/.codex` 数据。
+
+## 项目结构
+
+```text
+.
+├── package.json
+├── server.js
+├── public
+│   ├── index.html
+│   ├── app.js
+│   ├── styles.css
+│   └── assets
+│       └── codex-icon.png
+└── README.md
+```
+
+## 常用命令
+
+```bash
+npm start
+node --check server.js
+node --check public/app.js
+```
+
+## 说明
+
+这是一个轻量本地工具，没有数据库迁移、构建流程和前端框架。所有界面逻辑在 `public/app.js`，服务端 API 在 `server.js`。
+
+当前统计功能会在打开“用量统计”弹窗时扫描本地 rollout 文件。会话很多时，第一次统计可能需要等待片刻。

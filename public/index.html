@@ -1,0 +1,171 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Codex 会话管理器</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar">
+        <header class="brand">
+          <div class="mark" aria-hidden="true">
+            <img src="/assets/codex-icon.png" alt="" />
+          </div>
+          <div>
+            <h1>Codex 会话管理器</h1>
+            <p>本机会话索引</p>
+          </div>
+          <button class="stats-button" id="statsButton" type="button">用量统计</button>
+        </header>
+
+        <section class="controls" aria-label="会话筛选">
+          <label class="search">
+            <span>搜索</span>
+            <input id="searchInput" type="search" placeholder="标题、ID、路径、模型服务商" autocomplete="off" />
+          </label>
+
+          <div class="control-row">
+            <label>
+              <span>来源</span>
+              <select id="sourceFilter"></select>
+            </label>
+            <label>
+              <span>模型服务商</span>
+              <select id="providerFilter"></select>
+            </label>
+          </div>
+
+          <div class="control-row">
+            <label>
+              <span>时间</span>
+              <select id="timeFilter">
+                <option value="all">全部时间</option>
+                <option value="today">今天</option>
+                <option value="7d">近 7 天</option>
+                <option value="30d">近 30 天</option>
+                <option value="90d">近 90 天</option>
+                <option value="year">今年</option>
+                <option value="custom">自定义日期</option>
+              </select>
+            </label>
+            <label>
+              <span>重要性</span>
+              <select id="importanceFilter">
+                <option value="all">全部重要性</option>
+                <option value="critical">非常重要</option>
+                <option value="important_plus">重要及以上</option>
+                <option value="useful_plus">有用及以上</option>
+                <option value="low">不重要</option>
+              </select>
+            </label>
+          </div>
+
+          <div class="date-range is-hidden" id="customDateRange">
+            <label>
+              <span>开始</span>
+              <input id="dateStart" type="date" />
+            </label>
+            <label>
+              <span>结束</span>
+              <input id="dateEnd" type="date" />
+            </label>
+          </div>
+
+          <div class="segmented" role="group" aria-label="归档筛选">
+            <button class="is-active" data-archive="all">全部</button>
+            <button data-archive="active">未归档</button>
+            <button data-archive="archived">已归档</button>
+          </div>
+        </section>
+
+        <section class="summary-grid" id="summaryGrid" aria-label="会话概览"></section>
+
+        <section class="session-list" id="sessionList" aria-label="会话列表"></section>
+      </aside>
+
+      <main class="detail">
+        <header class="topbar">
+          <div>
+            <p class="eyebrow">本机 Codex 会话索引</p>
+            <h2 id="detailTitle">选择一个会话</h2>
+          </div>
+          <div class="actions">
+            <button id="refreshButton" title="刷新会话索引">刷新</button>
+            <button id="copyButton" title="复制恢复命令" disabled>复制恢复命令</button>
+          </div>
+        </header>
+
+        <section class="empty-state" id="emptyState">
+          <div class="empty-mark">ID</div>
+          <h3>选择一个会话查看来源和记录</h3>
+          <p>这个管理器只读本机 <code>~/.codex</code>，不会修改或归档任何会话。</p>
+        </section>
+
+        <section class="detail-body is-hidden" id="detailBody">
+          <section class="session-info-panel" id="sessionInfoPanel">
+            <div class="session-info-heading">
+              <div>
+                <h3>会话信息</h3>
+                <p id="sessionInfoSummary">恢复命令、重要性和基础字段</p>
+              </div>
+              <button class="panel-action" id="toggleSessionInfoButton" type="button" aria-expanded="false">展开</button>
+            </div>
+            <div class="session-info-content is-hidden" id="sessionInfoContent">
+              <div class="top-side-stack">
+                <div class="command-box">
+                  <span>恢复命令</span>
+                  <code id="resumeCommand"></code>
+                </div>
+                <div class="importance-top-card" id="importanceTopCard"></div>
+              </div>
+              <div class="meta-grid" id="metaGrid"></div>
+            </div>
+          </section>
+
+          <div class="split">
+            <section class="panel conversation-panel">
+              <div class="panel-heading">
+                <h3>对话记录</h3>
+                <div class="panel-heading-actions">
+                  <button class="panel-action is-hidden" id="expandTechnicalButton" type="button">显示技术索引</button>
+                  <span id="messageCount"></span>
+                </div>
+              </div>
+              <div class="timeline" id="timeline"></div>
+            </section>
+
+            <section class="panel technical-panel" id="technicalPanel">
+              <div class="panel-heading">
+                <h3>技术索引</h3>
+                <div class="panel-heading-actions">
+                  <span id="eventCount"></span>
+                  <button class="panel-icon-button" id="toggleTechnicalButton" type="button" aria-expanded="true" aria-label="收起技术索引">收起</button>
+                </div>
+              </div>
+              <div class="kv-list" id="technicalList"></div>
+            </section>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <div class="modal-backdrop is-hidden" id="statsModal" role="dialog" aria-modal="true" aria-labelledby="statsTitle">
+      <section class="stats-modal">
+        <header class="stats-modal-head">
+          <div>
+            <h2 id="statsTitle">用量统计</h2>
+            <p id="statsSubtitle">Token 消耗与 Skill 使用频率</p>
+          </div>
+          <button class="panel-icon-button" id="closeStatsButton" type="button" aria-label="关闭统计窗口">关闭</button>
+        </header>
+        <div class="stats-modal-body" id="statsModalBody">
+          <div class="stats-loading">正在汇总本机会话...</div>
+        </div>
+      </section>
+    </div>
+
+    <script src="/app.js" type="module"></script>
+  </body>
+</html>
