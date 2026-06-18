@@ -533,17 +533,61 @@ function updateCustomDateVisibility() {
   els.customDateRange.classList.toggle("is-hidden", !custom);
 }
 
-function buildActivityDays(tokenByDay, days = 126) {
-  const map = new Map((tokenByDay || []).map((item) => [item.date, Number(item.tokens || 0)]));
+function localDateKey(date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function fmtActivityDate(key) {
+  const [, month, day] = String(key || "").split("-");
+  return `${Number(month || 0)}月${Number(day || 0)}日`;
+}
+
+function buildActivityCalendar(tokenByDay, days = 365) {
+  const tokenMap = new Map((tokenByDay || []).map((item) => [item.date, Number(item.tokens || 0)]));
   const today = new Date();
-  const result = [];
-  for (let offset = days - 1; offset >= 0; offset -= 1) {
-    const date = new Date(today);
-    date.setDate(today.getDate() - offset);
-    const key = date.toISOString().slice(0, 10);
-    result.push({ date: key, tokens: map.get(key) || 0 });
+  today.setHours(0, 0, 0, 0);
+
+  const firstDay = new Date(today);
+  firstDay.setDate(today.getDate() - days + 1);
+
+  const start = new Date(firstDay);
+  start.setDate(firstDay.getDate() - firstDay.getDay());
+
+  const cells = [];
+  const monthLabels = [];
+  const seenMonths = new Set();
+  const cursor = new Date(start);
+  let index = 0;
+
+  while (cursor <= today) {
+    const col = Math.floor(index / 7) + 1;
+    const row = cursor.getDay() + 1;
+    if (cursor >= firstDay) {
+      const date = localDateKey(cursor);
+      const monthKey = date.slice(0, 7);
+      if (!seenMonths.has(monthKey)) {
+        monthLabels.push({ label: `${cursor.getMonth() + 1}月`, col });
+        seenMonths.add(monthKey);
+      }
+      cells.push({
+        date,
+        tokens: tokenMap.get(date) || 0,
+        col,
+        row
+      });
+    }
+    cursor.setDate(cursor.getDate() + 1);
+    index += 1;
   }
-  return result;
+
+  return {
+    cells,
+    monthLabels,
+    weekCount: Math.ceil(index / 7)
+  };
 }
 
 function tokenLevel(tokens, peak) {
@@ -558,16 +602,22 @@ function tokenLevel(tokens, peak) {
 
 function renderAnalytics(data) {
   const totals = data.totals || {};
-  const days = buildActivityDays(data.token_by_day, 365);
-  const peak = Math.max(...days.map((item) => item.tokens), 0);
+  const calendar = buildActivityCalendar(data.token_by_day, 365);
+  const peak = Math.max(...calendar.cells.map((item) => item.tokens), 0);
   const highReasoningPercent = totals.sessions
     ? Math.round(((data.reasoning_counts?.high || 0) / totals.sessions) * 100)
     : 0;
-  const cells = days
+  const cells = calendar.cells
     .map((item) => {
       const level = tokenLevel(item.tokens, peak);
-      return `<span class="activity-cell level-${level}" title="${escapeHtml(item.date)} · ${escapeHtml(fmtCompactNumber(item.tokens))} Token"></span>`;
+      const tooltip = item.tokens
+        ? `${fmtActivityDate(item.date)} 使用了 ${fmtCompactNumber(item.tokens)} 个 Token`
+        : `${fmtActivityDate(item.date)} 没有 Token 使用记录`;
+      return `<span class="activity-cell level-${level}" style="grid-column:${item.col};grid-row:${item.row}" data-tooltip="${escapeHtml(tooltip)}" title="${escapeHtml(tooltip)}"></span>`;
     })
+    .join("");
+  const monthLabels = calendar.monthLabels
+    .map((item) => `<span style="grid-column:${item.col}">${escapeHtml(item.label)}</span>`)
     .join("");
   const skills = data.top_skills?.length
     ? data.top_skills
@@ -598,7 +648,10 @@ function renderAnalytics(data) {
         <h3>Token 活动</h3>
         <div class="activity-legend"><span>低</span><i class="level-1"></i><i class="level-2"></i><i class="level-3"></i><i class="level-4"></i><span>高</span></div>
       </div>
-      <div class="activity-grid">${cells}</div>
+      <div class="activity-board" style="--activity-weeks:${calendar.weekCount}">
+        <div class="activity-grid">${cells}</div>
+        <div class="activity-months">${monthLabels}</div>
+      </div>
     </section>
 
     <div class="stats-columns">
