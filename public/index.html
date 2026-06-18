@@ -28,27 +28,19 @@
 
           <div class="control-row">
             <label>
-              <span>来源</span>
+              <span>入口来源</span>
               <select id="sourceFilter"></select>
             </label>
             <label>
-              <span>模型服务商</span>
-              <select id="providerFilter"></select>
+              <span>场景标签</span>
+              <select id="sceneFilter"></select>
             </label>
           </div>
 
           <div class="control-row">
             <label>
-              <span>时间</span>
-              <select id="timeFilter">
-                <option value="all">全部时间</option>
-                <option value="today">今天</option>
-                <option value="7d">近 7 天</option>
-                <option value="30d">近 30 天</option>
-                <option value="90d">近 90 天</option>
-                <option value="year">今年</option>
-                <option value="custom">自定义日期</option>
-              </select>
+              <span>模型服务商</span>
+              <select id="providerFilter"></select>
             </label>
             <label>
               <span>重要性</span>
@@ -61,6 +53,19 @@
               </select>
             </label>
           </div>
+
+          <label class="filter-wide">
+            <span>时间</span>
+            <select id="timeFilter">
+              <option value="all">全部时间</option>
+              <option value="today">今天</option>
+              <option value="7d">近 7 天</option>
+              <option value="30d">近 30 天</option>
+              <option value="90d">近 90 天</option>
+              <option value="year">今年</option>
+              <option value="custom">自定义日期</option>
+            </select>
+          </label>
 
           <div class="date-range is-hidden" id="customDateRange">
             <label>

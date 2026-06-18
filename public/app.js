@@ -11,6 +11,7 @@ const state = {
 const els = {
   searchInput: document.querySelector("#searchInput"),
   sourceFilter: document.querySelector("#sourceFilter"),
+  sceneFilter: document.querySelector("#sceneFilter"),
   providerFilter: document.querySelector("#providerFilter"),
   timeFilter: document.querySelector("#timeFilter"),
   importanceFilter: document.querySelector("#importanceFilter"),
@@ -45,19 +46,45 @@ const els = {
   expandTechnicalButton: document.querySelector("#expandTechnicalButton")
 };
 
-const sourceOrder = ["desktop", "cli", "exec", "subagent", "unknown"];
+const sourceOrder = [
+  "codex-desktop",
+  "terminal-cli",
+  "terminal-exec",
+  "obsidian-claudian",
+  "bridge-lark",
+  "bridge-coze",
+  "subagent",
+  "unknown"
+];
 const sourceLabels = {
-  desktop: "Codex 桌面端 / IDE",
-  cli: "Codex CLI",
-  exec: "codex exec",
+  "codex-desktop": "Codex 客户端",
+  "terminal-cli": "Terminal / Codex CLI",
+  "terminal-exec": "Terminal / codex exec",
+  "obsidian-claudian": "Obsidian / Claudian",
+  "bridge-lark": "Bridge / Lark",
+  "bridge-coze": "Bridge / Coze",
   subagent: "子代理",
-  unknown: "未知来源"
+  unknown: "未识别入口",
+  desktop: "Codex 客户端",
+  cli: "Terminal / Codex CLI",
+  exec: "Terminal / codex exec"
+};
+
+const sceneOrder = ["lark", "obsidian", "coze", "skill", "terminal-project", "codex-project", "general"];
+const sceneLabels = {
+  lark: "飞书 / Lark",
+  obsidian: "Obsidian 笔记",
+  coze: "Coze / Bridge",
+  skill: "Skill 工作流",
+  "terminal-project": "终端项目",
+  "codex-project": "Codex 项目",
+  general: "普通会话"
 };
 
 function sourceDisplayLabel(value, label) {
   if (sourceLabels[value]) return sourceLabels[value];
   if (String(value || "").startsWith("subagent:")) return String(label || value).replace(/^Subagent:/, "子代理：");
-  if (label === "Codex Desktop / IDE") return sourceLabels.desktop;
+  if (label === "Codex Desktop / IDE") return sourceLabels["codex-desktop"];
   if (label === "Subagent") return sourceLabels.subagent;
   if (label === "Unknown source") return sourceLabels.unknown;
   if (String(label || "").startsWith("Subagent:")) return String(label).replace(/^Subagent:/, "子代理：");
@@ -351,6 +378,13 @@ function sourceSort(a, b) {
   return a.label.localeCompare(b.label);
 }
 
+function sceneSort(a, b) {
+  const ai = sceneOrder.indexOf(a.value);
+  const bi = sceneOrder.indexOf(b.value);
+  if (ai !== -1 || bi !== -1) return (ai === -1 ? 99 : ai) - (bi === -1 ? 99 : bi);
+  return a.label.localeCompare(b.label);
+}
+
 function optionCounts(items, keyField, labelField) {
   const map = new Map();
   for (const item of items) {
@@ -361,6 +395,24 @@ function optionCounts(items, keyField, labelField) {
     const current = map.get(value) || { value, label, count: 0 };
     current.count += 1;
     map.set(value, current);
+  }
+  return [...map.values()].map((item) => ({
+    ...item,
+    label: `${item.label} (${item.count})`
+  }));
+}
+
+function sceneOptionCounts(items) {
+  const map = new Map();
+  for (const item of items) {
+    const keys = item.scene_keys?.length ? item.scene_keys : ["general"];
+    const labels = item.scene_labels?.length ? item.scene_labels : ["普通会话"];
+    keys.forEach((value, index) => {
+      const label = labels[index] || sceneLabels[value] || value;
+      const current = map.get(value) || { value, label, count: 0 };
+      current.count += 1;
+      map.set(value, current);
+    });
   }
   return [...map.values()].map((item) => ({
     ...item,
@@ -433,6 +485,7 @@ function renderSummary(stats) {
 function applyFilters() {
   const q = els.searchInput.value.trim().toLowerCase();
   const source = els.sourceFilter.value;
+  const scene = els.sceneFilter.value;
   const provider = els.providerFilter.value;
   const timeRange = els.timeFilter.value;
   const importance = els.importanceFilter.value;
@@ -443,6 +496,7 @@ function applyFilters() {
     if (state.archive === "active" && item.archived) return false;
     if (state.archive === "archived" && !item.archived) return false;
     if (source !== "all" && item.source_key !== source) return false;
+    if (scene !== "all" && !(item.scene_keys || []).includes(scene)) return false;
     if (provider !== "all" && item.model_provider !== provider) return false;
     if (!matchesTimeRange(item, timeRange, startDate, endDate)) return false;
     if (!matchesImportance(item, importance)) return false;
@@ -456,6 +510,10 @@ function applyFilters() {
       item.source,
       item.source_key,
       item.source_label,
+      item.codex_source_key,
+      item.codex_source_label,
+      ...(item.scene_keys || []),
+      ...(item.scene_labels || []),
       item.model_provider,
       item.cwd,
       item.rollout_path,
@@ -588,7 +646,8 @@ function renderList() {
   els.sessionList.innerHTML = state.filtered
     .map((item) => {
       const providerClass = item.model_provider === "openai" ? "provider-openai" : "provider-custom";
-      const sourceClass = item.source_key === "cli" ? "source-cli" : item.source_key === "desktop" ? "source-desktop" : "";
+      const sourceClass = item.source_key?.startsWith("terminal") ? "source-cli" : item.source_key === "codex-desktop" ? "source-desktop" : "";
+      const sceneLabel = (item.scene_labels || []).find((label) => label !== "普通会话") || item.scene_labels?.[0] || "普通会话";
       const importance = item.importance || { level: "low", label: "未判断", score: 0 };
       return `
         <button class="session-card ${item.id === state.selectedId ? "is-selected" : ""}" data-id="${escapeHtml(item.id)}">
@@ -602,6 +661,7 @@ function renderList() {
           </div>
           <div class="pill-row">
             <span class="pill ${sourceClass}">${escapeHtml(sourceDisplayLabel(item.source_key, item.source_label || item.source))}</span>
+            <span class="pill scene-pill">${escapeHtml(sceneLabel)}</span>
             <span class="pill ${providerClass}">${escapeHtml(item.model_provider || "服务商")}</span>
             <span class="pill">${escapeHtml(item.model || "模型")}</span>
             <span class="pill importance-pill importance-${escapeHtml(importance.level)}">${escapeHtml(importance.label)}</span>
@@ -618,9 +678,11 @@ function renderList() {
 }
 
 function renderMeta(session) {
+  const sceneText = session.scene_labels?.length ? session.scene_labels.join("、") : "普通会话";
   const items = [
     ["会话 ID", session.id, "copy"],
-    ["来源客户端", sourceDisplayLabel(session.source_key, session.source_label || session.source)],
+    ["入口来源", sourceDisplayLabel(session.source_key, session.source_label || session.source)],
+    ["场景标签", sceneText],
     ["模型服务商", session.model_provider],
     ["模型", session.model || "未知"],
     ["创建时间", fmtFullDate(session.created_at)],
@@ -808,7 +870,8 @@ async function selectSession(id) {
   const { session, rollout, rollout_error: rolloutError } = detail;
   els.detailTitle.textContent = session.title || session.id;
   const importance = session.importance || { label: "未判断", score: 0 };
-  els.sessionInfoSummary.textContent = `${sourceDisplayLabel(session.source_key, session.source_label || session.source)} · ${session.model || "未知模型"} · ${importance.label} ${importance.score}/100`;
+  const sceneSummary = (session.scene_labels || []).filter((label) => label !== "普通会话").slice(0, 2).join("、");
+  els.sessionInfoSummary.textContent = `${sourceDisplayLabel(session.source_key, session.source_label || session.source)}${sceneSummary ? ` · ${sceneSummary}` : ""} · ${session.model || "未知模型"} · ${importance.label} ${importance.score}/100`;
   renderResumeBox(session);
 
   renderMeta(session);
@@ -828,7 +891,12 @@ async function loadSessions() {
     setOptions(
       els.sourceFilter,
       optionCounts(state.sessions, "source_key", "source_label").sort(sourceSort),
-      "全部来源"
+      "全部入口"
+    );
+    setOptions(
+      els.sceneFilter,
+      sceneOptionCounts(state.sessions).sort(sceneSort),
+      "全部场景"
     );
     setOptions(
       els.providerFilter,
@@ -851,6 +919,7 @@ async function loadSessions() {
 
 els.searchInput.addEventListener("input", applyFilters);
 els.sourceFilter.addEventListener("change", applyFilters);
+els.sceneFilter.addEventListener("change", applyFilters);
 els.providerFilter.addEventListener("change", applyFilters);
 els.timeFilter.addEventListener("change", () => {
   updateCustomDateVisibility();

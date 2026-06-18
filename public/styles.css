@@ -128,6 +128,7 @@ label span {
 }
 
 .search,
+.filter-wide,
 .control-row label,
 .date-range label {
   display: grid;
@@ -167,6 +168,10 @@ select:focus,
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 8px;
+  margin-top: 8px;
+}
+
+.filter-wide {
   margin-top: 8px;
 }
 
@@ -366,6 +371,10 @@ select:focus,
 
 .source-desktop {
   color: var(--openai);
+}
+
+.scene-pill {
+  color: #5f4f2f;
 }
 
 .archive-pill {

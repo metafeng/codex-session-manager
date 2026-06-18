@@ -130,6 +130,77 @@ function sourceInfo(source, originator, threadSource) {
   return { key: source, label: source, raw: source };
 }
 
+async function readSessionMeta(path) {
+  if (!path) return {};
+  const input = createReadStream(path, { encoding: "utf8" });
+  const rl = createInterface({ input, crlfDelay: Infinity });
+  try {
+    for await (const line of rl) {
+      if (!line.trim()) continue;
+      const event = JSON.parse(line);
+      if (event.type === "session_meta") return event.payload || {};
+      return {};
+    }
+  } catch {
+    return {};
+  } finally {
+    rl.close();
+    input.destroy();
+  }
+  return {};
+}
+
+function combinedContext({ title = "", preview = "", cwd = "", originator = "", source = "" }) {
+  return `${title}\n${preview}\n${cwd}\n${originator}\n${source}`;
+}
+
+function entrySourceInfo({ source, originator, threadSource, title, preview, cwd }) {
+  const context = combinedContext({ title, preview, cwd, originator, source });
+  const lower = context.toLowerCase();
+
+  if (threadSource === "subagent" || String(source || "").includes("\"subagent\"")) {
+    return { key: "subagent", label: "子代理" };
+  }
+  if (/claudian/.test(lower)) {
+    return { key: "obsidian-claudian", label: "Obsidian / Claudian" };
+  }
+  if (/lark-channel-bridge|feishu.*bridge|lark.*bridge/.test(lower)) {
+    return { key: "bridge-lark", label: "Bridge / Lark" };
+  }
+  if (/<coze-context>|\/\.coze\/agents|coze/.test(lower)) {
+    return { key: "bridge-coze", label: "Bridge / Coze" };
+  }
+  if (source === "exec" || /codex_exec/.test(lower)) {
+    return { key: "terminal-exec", label: "Terminal / codex exec" };
+  }
+  if (source === "cli" || /codex-tui/.test(lower)) {
+    return { key: "terminal-cli", label: "Terminal / Codex CLI" };
+  }
+  if (source === "vscode" || /codex desktop|codex_vscode|codex_cli_rs/.test(lower)) {
+    return { key: "codex-desktop", label: "Codex 客户端" };
+  }
+  return { key: "unknown", label: "未识别入口" };
+}
+
+function sceneTagsFor({ source, entrySourceKey, title, preview, cwd, originator }) {
+  const context = combinedContext({ title, preview, cwd, originator, source });
+  const lower = context.toLowerCase();
+  const tags = [];
+  const add = (key, label) => {
+    if (!tags.some((item) => item.key === key)) tags.push({ key, label });
+  };
+
+  if (/lark-channel-bridge|飞书|feishu|lark/.test(lower)) add("lark", "飞书 / Lark");
+  if (/claudian|current note:|obsidian|icloud~md~obsidian|\.obsidian/.test(lower)) add("obsidian", "Obsidian 笔记");
+  if (/<coze-context>|\/\.coze\/agents|coze/.test(lower)) add("coze", "Coze / Bridge");
+  if (/\[\$|plugin:\/\/|\/skills\/|skill/.test(lower)) add("skill", "Skill 工作流");
+  if (entrySourceKey?.startsWith("terminal") || /\/vibecoding|\/workbuddy|terminal|shell/.test(lower)) add("terminal-project", "终端项目");
+  if (/\/documents\/codex|\/outputs\//.test(lower)) add("codex-project", "Codex 项目");
+  if (!tags.length) add("general", "普通会话");
+
+  return tags;
+}
+
 function shouldHideMessage(role, text) {
   const normalized = String(text || "").trim();
   if (!normalized) return true;
@@ -489,13 +560,31 @@ async function getSessions() {
     order by updated_at_ms desc`
   );
 
-  return rows.map((row) => {
-    const originator = null;
+  return Promise.all(rows.map(async (row) => {
+    const meta = await readSessionMeta(row.rollout_path);
+    const originator = meta.originator || null;
+    const cwd = row.cwd || meta.cwd || "";
     const source = sourceInfo(row.source, originator, row.thread_source);
+    const entrySource = entrySourceInfo({
+      source: row.source,
+      originator,
+      threadSource: row.thread_source,
+      title: row.title,
+      preview: row.preview,
+      cwd
+    });
+    const sceneTags = sceneTagsFor({
+      source: row.source,
+      entrySourceKey: entrySource.key,
+      title: row.title,
+      preview: row.preview,
+      cwd,
+      originator
+    });
     const importance = judgeImportance({
       title: row.title,
       preview: row.preview,
-      cwd: row.cwd,
+      cwd,
       tokens: row.tokens_used
     });
     return {
@@ -507,13 +596,17 @@ async function getSessions() {
       archived: Boolean(row.archived),
       has_user_event: Boolean(row.has_user_event),
       originator,
-      source_key: source.key,
-      source_label: source.label,
+      source_key: entrySource.key,
+      source_label: entrySource.label,
+      codex_source_key: source.key,
+      codex_source_label: source.label,
       raw_source: source.raw,
+      scene_keys: sceneTags.map((item) => item.key),
+      scene_labels: sceneTags.map((item) => item.label),
       importance,
       resume_command: `codex resume ${row.id} --all`
     };
-  });
+  }));
 }
 
 async function parseRollout(path, lineLimit = 1200) {
@@ -736,10 +829,27 @@ async function handleApi(req, res, url) {
     }
     const originator = rollout?.meta?.originator || null;
     const source = sourceInfo(session.source, originator, session.thread_source);
+    const cwd = session.cwd || rollout?.meta?.cwd || "";
+    const entrySource = entrySourceInfo({
+      source: session.source,
+      originator,
+      threadSource: session.thread_source,
+      title: session.title,
+      preview: session.preview,
+      cwd
+    });
+    const sceneTags = sceneTagsFor({
+      source: session.source,
+      entrySourceKey: entrySource.key,
+      title: session.title,
+      preview: session.preview,
+      cwd,
+      originator
+    });
     const importance = judgeImportance({
       title: session.title,
       preview: session.preview,
-      cwd: session.cwd,
+      cwd,
       tokens: session.tokens_used,
       turns: rollout?.turns || [],
       processSummary: rollout?.process_summary || null
@@ -753,9 +863,13 @@ async function handleApi(req, res, url) {
         updated_at: session.updated_at_ms ? new Date(session.updated_at_ms).toISOString() : null,
         archived: Boolean(session.archived),
         originator,
-        source_key: source.key,
-        source_label: source.label,
+        source_key: entrySource.key,
+        source_label: entrySource.label,
+        codex_source_key: source.key,
+        codex_source_label: source.label,
         raw_source: source.raw,
+        scene_keys: sceneTags.map((item) => item.key),
+        scene_labels: sceneTags.map((item) => item.label),
         importance,
         resume_command: `codex resume ${session.id} --all`,
         log_count: await getLogCount(session.id)

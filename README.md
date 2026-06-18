@@ -1,13 +1,15 @@
 # Codex 会话管理器
 
-一个本地只读的 Codex session 可视化管理器，用来浏览 Codex Desktop、Codex CLI、`codex exec` 以及归档会话记录。
+一个本地只读的 Codex session 可视化管理器，用来浏览 Codex Desktop、Codex CLI、`codex exec`、Obsidian / Claudian、Bridge 场景以及归档会话记录。
 
 它会读取本机 `~/.codex` 下的 session、日志和 rollout JSONL 文件，帮助你快速找到历史会话、复制恢复命令、查看对话过程、分析 Token 消耗和 Skill 使用频率。
 
 ## 功能
 
 - 会话列表：按更新时间浏览本机 Codex 会话。
-- 多维筛选：支持按来源、模型服务商、时间、重要性、归档状态筛选。
+- 多维筛选：支持按入口来源、场景标签、模型服务商、时间、重要性、归档状态筛选。
+- 入口来源识别：细分 Codex 客户端、Terminal / Codex CLI、Terminal / codex exec、Obsidian / Claudian、Bridge / Lark、Bridge / Coze、子代理等入口。
+- 场景标签识别：标记飞书 / Lark、Obsidian 笔记、Coze / Bridge、Skill 工作流、终端项目、Codex 项目等场景。
 - 自定义日期：可以用系统日期选择器按起止日期精确过滤会话。
 - 会话恢复：一键复制 `codex resume <session-id> --all` 命令。
 - 对话复现：按一轮一轮的用户提问、处理过程、最终回复展示历史会话。
@@ -68,6 +70,8 @@ PORT=8899 npm start
 ~/.codex/sessions/**/*.jsonl
 ~/.codex/archived_sessions/*.jsonl
 ```
+
+入口来源和场景标签来自本地字段与 rollout 内容的组合判断，包括 `source`、`originator`、`cwd`、标题和预览文本。没有稳定来源字段的第三方桥接环境会用路径和关键词启发式识别。
 
 如果你使用自定义 Codex 数据目录，可以设置 `CODEX_HOME`：
 
