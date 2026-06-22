@@ -1472,6 +1472,6 @@ const server = createServer(async (req, res) => {
 });
 
 server.listen(port, "127.0.0.1", () => {
-  console.log(`Codex Session Manager running at http://127.0.0.1:${port}`);
+  console.log(`Agent Session Manager running at http://127.0.0.1:${port}`);
   console.log(`Reading Codex home: ${codexHome}`);
 });
