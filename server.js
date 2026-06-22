@@ -833,6 +833,13 @@ function ccShouldHideUserContent(content) {
   if (text.startsWith("<environment_context>")) return true;
   if (text.startsWith("<plugins_instructions>")) return true;
   if (text.startsWith("## Memory")) return true;
+  // Slash-command plumbing and local-command echoes are not real user turns.
+  if (text.startsWith("<command-name>")) return true;
+  if (text.startsWith("<command-message>")) return true;
+  if (text.startsWith("<command-args>")) return true;
+  if (text.startsWith("<local-command-stdout>")) return true;
+  if (text.startsWith("<local-command-caveat>")) return true;
+  if (text.startsWith("Caveat: The messages below")) return true;
   return false;
 }
 
@@ -881,8 +888,9 @@ async function parseCCSession(filePath, lineLimit = 400) {
       if (!entrypoint) entrypoint = event.entrypoint || null;
       if (!version) version = event.version || null;
 
-      if (!firstUserText && !ccShouldHideUserContent(event.content)) {
-        firstUserText = String(event.content || "").trim();
+      const userContent = event.message?.content ?? event.content;
+      if (!firstUserText && typeof userContent === "string" && !ccShouldHideUserContent(userContent)) {
+        firstUserText = userContent.trim();
         turnCount += 1;
       }
     }
@@ -959,7 +967,7 @@ async function parseCCRollout(filePath, lineLimit = 1200) {
     if (!meta.entrypoint && event.entrypoint) meta.entrypoint = event.entrypoint;
 
     if (event.type === "user" && !event.isMeta && !event.isSidechain) {
-      const content = event.content;
+      const content = event.message?.content ?? event.content;
 
       if (Array.isArray(content)) {
         for (const part of content) {
