@@ -766,7 +766,7 @@ function renderMeta(session) {
     ["创建时间", fmtFullDate(session.created_at)],
     ["更新时间", fmtFullDate(session.updated_at)],
     ["工作目录", shortPath(session.cwd)],
-    ["Codex 版本", session.cli_version || "未知"]
+    [state.mode === "claude" ? "Claude Code 版本" : "Codex 版本", session.cli_version || "未知"]
   ];
   els.metaGrid.innerHTML = items
     .map(([label, value, action]) => {
