@@ -832,15 +832,15 @@ code {
 
 .timeline {
   display: grid;
-  gap: 28px;
-  padding: 18px 18px 26px;
+  gap: 14px;
+  padding: 14px 16px 18px;
   background: #fff;
 }
 
 .turn {
   display: grid;
-  gap: 12px;
-  padding-bottom: 24px;
+  gap: 8px;
+  padding-bottom: 14px;
   border-bottom: 1px solid var(--line);
 }
 
@@ -851,18 +851,22 @@ code {
 
 .process-trace {
   width: 100%;
-  padding: 2px 0 2px;
+  padding: 0;
 }
 
 .process-trace summary {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
-  color: var(--muted);
+  gap: 7px;
+  color: var(--muted-2);
   cursor: pointer;
-  font-size: 13px;
+  font-size: 12px;
   list-style: none;
   user-select: none;
+}
+
+.process-trace summary:hover {
+  color: var(--muted);
 }
 
 .process-trace summary::-webkit-details-marker {
@@ -890,7 +894,7 @@ code {
 .process-list {
   display: grid;
   gap: 0;
-  margin-top: 12px;
+  margin-top: 8px;
   border: 1px solid var(--line);
   border-radius: 8px;
   overflow: hidden;
@@ -902,7 +906,7 @@ code {
   grid-template-columns: 9px minmax(0, 1fr) auto;
   gap: 10px;
   align-items: start;
-  padding: 10px 12px;
+  padding: 7px 11px;
   border-bottom: 1px solid var(--line);
   font-size: 12px;
 }
@@ -983,7 +987,7 @@ code {
 
 .message {
   display: grid;
-  gap: 7px;
+  gap: 4px;
   min-width: 0;
   max-width: 86%;
 }
@@ -1004,7 +1008,7 @@ code {
   justify-self: start;
   max-width: 100%;
   width: 100%;
-  padding: 4px 0;
+  padding: 0;
   border-top: 1px solid transparent;
 }
 
@@ -1039,25 +1043,25 @@ code {
   max-width: 100%;
   color: #33322e;
   font-size: 13px;
-  line-height: 1.58;
+  line-height: 1.5;
   overflow-wrap: anywhere;
   white-space: pre-wrap;
 }
 
 .message-user .message-body {
-  border-radius: 16px;
+  border-radius: 14px;
   background: #f0f0ed;
-  padding: 13px 15px;
+  padding: 9px 13px;
 }
 
 .message-assistant .message-body {
-  padding: 2px 0 4px;
+  padding: 0;
   white-space: normal;
 }
 
 .markdown-body {
   display: grid;
-  gap: 10px;
+  gap: 7px;
 }
 
 .markdown-body p,
