@@ -1,5 +1,5 @@
 import { createServer } from "node:http";
-import { readFile, access } from "node:fs/promises";
+import { readFile, access, readdir } from "node:fs/promises";
 import { createReadStream } from "node:fs";
 import { execFile } from "node:child_process";
 import { createInterface } from "node:readline";
@@ -15,6 +15,9 @@ const codexHome = process.env.CODEX_HOME || join(os.homedir(), ".codex");
 const stateDb = join(codexHome, "state_5.sqlite");
 const logsDb = join(codexHome, "logs_2.sqlite");
 const archivedDir = join(codexHome, "archived_sessions");
+const claudeHome = process.env.CLAUDE_HOME || join(os.homedir(), ".claude");
+const claudeProjectsDir = join(claudeHome, "projects");
+const claudeStatsCache = join(claudeHome, "stats-cache.json");
 const port = Number(process.env.PORT || 8787);
 
 const mimeTypes = {
@@ -22,7 +25,8 @@ const mimeTypes = {
   ".css": "text/css; charset=utf-8",
   ".js": "text/javascript; charset=utf-8",
   ".json": "application/json; charset=utf-8",
-  ".png": "image/png"
+  ".png": "image/png",
+  ".svg": "image/svg+xml"
 };
 
 function json(res, status, body) {
@@ -773,6 +777,477 @@ async function getLogCount(threadId) {
   }
 }
 
+// ─── Claude Code session support ─────────────────────────────────────────────
+
+function ccTextFromContent(content) {
+  if (typeof content === "string") return content;
+  if (!Array.isArray(content)) return "";
+  return content
+    .map((part) => {
+      if (part?.type === "text") return part.text || "";
+      return "";
+    })
+    .filter(Boolean)
+    .join("\n");
+}
+
+function ccEntrySourceInfo(entrypoint) {
+  if (!entrypoint || entrypoint === "unknown") return { key: "cc-unknown", label: "未识别入口" };
+  if (entrypoint === "sdk-cli") return { key: "cc-sdk-cli", label: "SDK / CLI" };
+  if (entrypoint === "sdk-ts") return { key: "cc-sdk-ts", label: "SDK / TypeScript" };
+  if (entrypoint === "cli") return { key: "cc-cli", label: "Claude CLI" };
+  if (entrypoint === "ide") return { key: "cc-ide", label: "Claude IDE" };
+  if (entrypoint === "interactive") return { key: "cc-interactive", label: "交互式终端" };
+  if (entrypoint === "claude-desktop") return { key: "cc-claude-desktop", label: "Claude 客户端" };
+  return { key: `cc-${entrypoint}`, label: entrypoint };
+}
+
+function ccSceneTagsFor({ entrypoint, cwd, title, preview }) {
+  const context = `${cwd}\n${title}\n${preview}`.toLowerCase();
+  const tags = [];
+  const add = (key, label) => {
+    if (!tags.some((t) => t.key === key)) tags.push({ key, label });
+  };
+  if (/lark|feishu|飞书/.test(context)) add("lark", "飞书 / Lark");
+  if (/obsidian|icloud~md~obsidian|\.obsidian/.test(context)) add("obsidian", "Obsidian 笔记");
+  if (/coze/.test(context)) add("coze", "Coze / Bridge");
+  if (/\[\$|\/skills\/|skill/.test(context)) add("skill", "Skill 工作流");
+  if (entrypoint === "sdk-cli" || entrypoint === "sdk-ts") add("sdk", "SDK 接入");
+  if (!tags.length) add("general", "普通会话");
+  return tags;
+}
+
+function ccProviderFromModel(model) {
+  if (!model) return "unknown";
+  if (model.startsWith("claude")) return "anthropic";
+  if (model.startsWith("gpt") || model.startsWith("o1") || model.startsWith("o3")) return "openai";
+  if (model.startsWith("gemini")) return "google";
+  return "unknown";
+}
+
+function ccShouldHideUserContent(content) {
+  if (Array.isArray(content)) return true;  // tool_result arrays → not real user turns
+  const text = String(content || "").trim();
+  if (!text || text.length < 3) return true;
+  if (text.startsWith("# AGENTS")) return true;
+  if (text.startsWith("<environment_context>")) return true;
+  if (text.startsWith("<plugins_instructions>")) return true;
+  if (text.startsWith("## Memory")) return true;
+  return false;
+}
+
+async function parseCCSession(filePath, lineLimit = 400) {
+  const rl = createInterface({
+    input: createReadStream(filePath, { encoding: "utf8" }),
+    crlfDelay: Infinity
+  });
+
+  let sessionId = null;
+  let cwd = null;
+  let entrypoint = null;
+  let version = null;
+  let firstUserText = null;
+  let lastPrompt = null;
+  let firstTimestamp = null;
+  let lastTimestamp = null;
+  let totalInputTokens = 0;
+  let totalOutputTokens = 0;
+  let model = null;
+  let lineCount = 0;
+  let turnCount = 0;
+
+  for await (const line of rl) {
+    lineCount += 1;
+    if (lineCount > lineLimit) { rl.close(); break; }
+    if (!line.trim()) continue;
+
+    let event;
+    try { event = JSON.parse(line); } catch { continue; }
+
+    const ts = event.timestamp;
+    if (ts) {
+      firstTimestamp = firstTimestamp || ts;
+      lastTimestamp = ts;
+    }
+
+    if (!sessionId) sessionId = event.sessionId;
+
+    if (event.type === "last-prompt") {
+      lastPrompt = String(event.lastPrompt || "").trim() || null;
+    }
+
+    if (event.type === "user" && !event.isMeta && !event.isSidechain) {
+      if (!cwd) cwd = event.cwd || null;
+      if (!entrypoint) entrypoint = event.entrypoint || null;
+      if (!version) version = event.version || null;
+
+      if (!firstUserText && !ccShouldHideUserContent(event.content)) {
+        firstUserText = String(event.content || "").trim();
+        turnCount += 1;
+      }
+    }
+
+    if (event.type === "assistant" && !event.isSidechain) {
+      const msg = event.message || {};
+      if (!model && msg.model) model = msg.model;
+      const usage = msg.usage || {};
+      totalInputTokens += (usage.input_tokens || 0) + (usage.cache_read_input_tokens || 0) + (usage.cache_creation_input_tokens || 0);
+      totalOutputTokens += usage.output_tokens || 0;
+      if (turnCount > 0) turnCount += 1;
+    }
+  }
+
+  rl.close();
+
+  if (!sessionId) {
+    sessionId = filePath.split("/").pop().replace(".jsonl", "");
+  }
+
+  const rawTitle = lastPrompt || firstUserText || "";
+  const rawPreview = firstUserText || lastPrompt || "";
+
+  return {
+    id: sessionId,
+    title: compactText(rawTitle, 180),
+    preview: compactText(rawPreview, 420),
+    cwd: cwd || "",
+    entrypoint: entrypoint || "unknown",
+    version: version || null,
+    model: model || null,
+    model_provider: ccProviderFromModel(model),
+    tokens_used: totalInputTokens + totalOutputTokens,
+    created_at: firstTimestamp,
+    updated_at: lastTimestamp,
+    archived: false,
+    rollout_path: filePath,
+    turn_count: turnCount
+  };
+}
+
+async function parseCCRollout(filePath, lineLimit = 1200) {
+  const meta = {};
+  const counts = {};
+  const messages = [];
+  const processEvents = [];
+  const toolCalls = [];
+  let lineCount = 0;
+  let firstTimestamp = null;
+  let lastTimestamp = null;
+
+  const rl = createInterface({
+    input: createReadStream(filePath, { encoding: "utf8" }),
+    crlfDelay: Infinity
+  });
+
+  for await (const line of rl) {
+    lineCount += 1;
+    if (lineCount > lineLimit) { rl.close(); break; }
+    if (!line.trim()) continue;
+
+    let event;
+    try { event = JSON.parse(line); } catch { continue; }
+
+    const ts = event.timestamp || null;
+    if (ts) {
+      firstTimestamp = firstTimestamp || ts;
+      lastTimestamp = ts;
+    }
+    counts[event.type] = (counts[event.type] || 0) + 1;
+
+    if (!meta.cwd && event.cwd) meta.cwd = event.cwd;
+    if (!meta.sessionId && event.sessionId) meta.sessionId = event.sessionId;
+    if (!meta.entrypoint && event.entrypoint) meta.entrypoint = event.entrypoint;
+
+    if (event.type === "user" && !event.isMeta && !event.isSidechain) {
+      const content = event.content;
+
+      if (Array.isArray(content)) {
+        for (const part of content) {
+          if (part?.type === "tool_result") {
+            const resultText = typeof part.content === "string"
+              ? part.content
+              : ccTextFromContent(part.content);
+            pushProcess(processEvents, {
+              kind: "result",
+              title: "工具返回结果",
+              detail: summarizeToolOutput(resultText),
+              timestamp: ts
+            });
+          }
+        }
+      } else {
+        const rawText = String(content || "");
+        const text = preserveText(visibleMessageText("user", rawText), 4000);
+        if (!shouldHideMessage("user", text) && !ccShouldHideUserContent(content)) {
+          messages.push({ role: "user", text, timestamp: ts });
+        }
+      }
+    }
+
+    if (event.type === "assistant" && !event.isSidechain) {
+      const msg = event.message || {};
+      const content = msg.content;
+      if (!Array.isArray(content)) continue;
+
+      for (const part of content) {
+        if (part.type === "text" && part.text) {
+          const text = preserveText(part.text, 6000);
+          if (text) messages.push({ role: "assistant", text, timestamp: ts });
+        } else if (part.type === "tool_use") {
+          const name = part.name || "tool";
+          toolCalls.push({ name, status: "called", timestamp: ts });
+          const inputText = typeof part.input === "string"
+            ? part.input
+            : JSON.stringify(part.input || {});
+          pushProcess(processEvents, {
+            kind: "tool",
+            title: `调用 ${name}`,
+            detail: summarizeFunctionCall(inputText),
+            timestamp: ts
+          });
+        }
+      }
+    }
+  }
+
+  const visibleMessages = withoutDuplicateEvents(messages).slice(0, 80);
+  const skills = [...new Set(processEvents.flatMap((e) => e.skills || []))].slice(0, 16);
+  const visibleProcessEvents = processEvents.slice(0, 240);
+  const turns = buildTurns(visibleMessages, visibleProcessEvents);
+  const processSummary = {
+    event_count: processEvents.length,
+    tool_count: toolCalls.length,
+    skill_count: skills.length,
+    skills,
+    duration: durationLabel(firstTimestamp, lastTimestamp)
+  };
+
+  return {
+    meta,
+    counts,
+    messages: visibleMessages,
+    turns,
+    process_events: visibleProcessEvents,
+    process_summary: processSummary,
+    tool_calls: toolCalls.slice(0, 80),
+    line_count: lineCount,
+    truncated: lineCount > lineLimit
+  };
+}
+
+async function getCCSessions() {
+  const sessions = [];
+  let projectDirs = [];
+
+  try {
+    projectDirs = await readdir(claudeProjectsDir);
+  } catch {
+    return [];
+  }
+
+  for (const dirName of projectDirs) {
+    const projectPath = join(claudeProjectsDir, dirName);
+    let files = [];
+    try {
+      const entries = await readdir(projectPath);
+      files = entries.filter((f) => f.endsWith(".jsonl")).map((f) => join(projectPath, f));
+    } catch {
+      continue;
+    }
+
+    for (const filePath of files) {
+      try {
+        const raw = await parseCCSession(filePath);
+        const entrySource = ccEntrySourceInfo(raw.entrypoint);
+        const sceneTags = ccSceneTagsFor({
+          entrypoint: raw.entrypoint,
+          cwd: raw.cwd,
+          title: raw.title,
+          preview: raw.preview
+        });
+        const importance = judgeImportance({
+          title: raw.title,
+          preview: raw.preview,
+          cwd: raw.cwd,
+          tokens: raw.tokens_used
+        });
+        sessions.push({
+          ...raw,
+          source_key: entrySource.key,
+          source_label: entrySource.label,
+          scene_keys: sceneTags.map((t) => t.key),
+          scene_labels: sceneTags.map((t) => t.label),
+          importance,
+          resume_command: `claude --resume ${raw.id}`
+        });
+      } catch {
+        // skip unreadable sessions
+      }
+    }
+  }
+
+  return sessions.sort((a, b) => new Date(b.updated_at || 0) - new Date(a.updated_at || 0));
+}
+
+async function getCCAnalytics() {
+  let statsCache = {};
+  try {
+    const data = await readFile(claudeStatsCache, "utf8");
+    statsCache = JSON.parse(data);
+  } catch {
+    // stats-cache.json unavailable
+  }
+
+  const rawDailyTokens = statsCache.dailyModelTokens || [];
+  const tokenByDay = rawDailyTokens.map((item) => ({
+    date: item.date,
+    tokens: Object.values(item.tokensByModel || {}).reduce((a, b) => Number(a) + Number(b), 0)
+  }));
+
+  const modelUsage = statsCache.modelUsage || {};
+  let totalTokens = 0;
+  const modelReasoningCounts = {};
+  for (const [modelName, data] of Object.entries(modelUsage)) {
+    const t = (data.inputTokens || 0) + (data.outputTokens || 0) +
+               (data.cacheReadInputTokens || 0) + (data.cacheCreationInputTokens || 0);
+    totalTokens += t;
+    const sessions = data.sessions || 0;
+    if (sessions) modelReasoningCounts[modelName] = sessions;
+  }
+
+  const peakTokens = tokenByDay.reduce((max, d) => Math.max(max, d.tokens), 0);
+
+  const sessions = await getCCSessions();
+  const skillCounts = {};
+  let skillEvents = 0;
+  let longestSeconds = 0;
+  for (const session of sessions.slice(0, 60)) {
+    try {
+      const rollout = await parseCCRollout(session.rollout_path, 900);
+      longestSeconds = Math.max(longestSeconds, durationSecondsFromLabel(rollout.process_summary?.duration));
+      for (const event of rollout.process_events || []) {
+        for (const skill of event.skills || []) {
+          skillCounts[skill] = (skillCounts[skill] || 0) + 1;
+          skillEvents += 1;
+        }
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  const topSkills = Object.entries(skillCounts)
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+    .slice(0, 12)
+    .map(([name, count]) => ({ name, count }));
+
+  const topReasoning = Object.entries(modelReasoningCounts).sort((a, b) => b[1] - a[1])[0] || ["unknown", 0];
+
+  return {
+    generated_at: new Date().toISOString(),
+    totals: {
+      tokens: totalTokens,
+      peak_tokens: peakTokens,
+      sessions: statsCache.totalSessions || sessions.length,
+      active: sessions.length,
+      archived: 0,
+      unique_skills: Object.keys(skillCounts).length,
+      skill_events: skillEvents,
+      top_reasoning: topReasoning[0],
+      top_reasoning_count: topReasoning[1],
+      longest_task_seconds: longestSeconds
+    },
+    token_by_day: tokenByDay,
+    top_skills: topSkills,
+    reasoning_counts: modelReasoningCounts
+  };
+}
+
+async function handleCCApi(req, res, url) {
+  if (url.pathname === "/api/cc/health") {
+    return json(res, 200, {
+      ok: true,
+      claude_home: claudeHome,
+      projects_dir: claudeProjectsDir,
+      stats_cache: claudeStatsCache
+    });
+  }
+
+  if (url.pathname === "/api/cc/sessions") {
+    const sessions = await getCCSessions();
+    const bySource = {};
+    const byProvider = {};
+    for (const item of sessions) {
+      bySource[item.source_key || "unknown"] = (bySource[item.source_key || "unknown"] || 0) + 1;
+      byProvider[item.model_provider || "unknown"] = (byProvider[item.model_provider || "unknown"] || 0) + 1;
+    }
+    return json(res, 200, {
+      sessions,
+      stats: {
+        total: sessions.length,
+        archived: sessions.filter((s) => s.archived).length,
+        active: sessions.filter((s) => !s.archived).length,
+        by_source: bySource,
+        by_provider: byProvider
+      }
+    });
+  }
+
+  if (url.pathname === "/api/cc/analytics") {
+    try {
+      return json(res, 200, await getCCAnalytics());
+    } catch (error) {
+      return json(res, 500, { error: error.message || "Analytics failed" });
+    }
+  }
+
+  const detailMatch = url.pathname.match(/^\/api\/cc\/sessions\/([0-9a-f-]+)$/);
+  if (detailMatch) {
+    const id = detailMatch[1];
+    const allSessions = await getCCSessions();
+    const session = allSessions.find((s) => s.id === id);
+    if (!session) return json(res, 404, { error: "Session not found" });
+
+    let rollout = null;
+    let rolloutError = null;
+    try {
+      rollout = await parseCCRollout(session.rollout_path);
+    } catch (error) {
+      rolloutError = error.message;
+    }
+
+    const importance = judgeImportance({
+      title: session.title,
+      preview: session.preview,
+      cwd: session.cwd,
+      tokens: session.tokens_used,
+      turns: rollout?.turns || [],
+      processSummary: rollout?.process_summary || null
+    });
+
+    return json(res, 200, {
+      session: {
+        ...session,
+        title: compactText(session.title || session.id, 220),
+        preview: compactText(session.preview || session.title || "", 720),
+        importance,
+        log_count: null,
+        cli_version: session.version,
+        reasoning_effort: null,
+        thread_source: null,
+        agent_nickname: null,
+        agent_role: null
+      },
+      rollout,
+      rollout_error: rolloutError
+    });
+  }
+
+  return json(res, 404, { error: "Unknown CC API route" });
+}
+
+// ─── end Claude Code session support ─────────────────────────────────────────
+
 async function handleApi(req, res, url) {
   if (url.pathname === "/api/health") {
     return json(res, 200, {
@@ -907,7 +1382,9 @@ async function serveStatic(req, res, url) {
 const server = createServer(async (req, res) => {
   const url = new URL(req.url || "/", `http://${req.headers.host || "localhost"}`);
   try {
-    if (url.pathname.startsWith("/api/")) {
+    if (url.pathname.startsWith("/api/cc/")) {
+      await handleCCApi(req, res, url);
+    } else if (url.pathname.startsWith("/api/")) {
       await handleApi(req, res, url);
     } else {
       await serveStatic(req, res, url);

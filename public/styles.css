@@ -60,11 +60,64 @@ button {
   background: #f2f1ed;
 }
 
+.tool-switcher {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  padding: 14px 16px 0;
+}
+
+.tool-switch-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 9px 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  background: #fcfbf7;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 600;
+  transition: all 0.15s ease;
+}
+
+.tool-switch-btn:hover {
+  border-color: var(--accent);
+  color: var(--text);
+}
+
+.tool-switch-btn.is-active {
+  background: var(--text);
+  border-color: var(--text);
+  color: #fff;
+}
+
+.tool-switch-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 999px;
+  background: currentColor;
+  flex: none;
+}
+
+.tool-switch-btn .codex-dot {
+  background: var(--openai);
+}
+
+.tool-switch-btn .claude-dot {
+  background: var(--custom);
+}
+
+.tool-switch-btn.is-active .tool-switch-dot {
+  background: #fff;
+}
+
 .brand {
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 22px 22px 16px;
+  padding: 16px 22px 16px;
 }
 
 .brand > div:nth-child(2) {

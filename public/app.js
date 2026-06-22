@@ -5,8 +5,13 @@ const state = {
   archive: "all",
   stats: null,
   technicalCollapsed: false,
-  sessionInfoCollapsed: true
+  sessionInfoCollapsed: true,
+  mode: "codex"  // "codex" | "claude"
 };
+
+function apiBase() {
+  return state.mode === "claude" ? "api/cc" : "api";
+}
 
 const els = {
   searchInput: document.querySelector("#searchInput"),
@@ -28,8 +33,13 @@ const els = {
   refreshButton: document.querySelector("#refreshButton"),
   copyButton: document.querySelector("#copyButton"),
   emptyState: document.querySelector("#emptyState"),
+  emptyStateSub: document.querySelector("#emptyStateSub"),
   detailBody: document.querySelector("#detailBody"),
   detailTitle: document.querySelector("#detailTitle"),
+  detailEyebrow: document.querySelector("#detailEyebrow"),
+  brandTitle: document.querySelector("#brandTitle"),
+  brandSub: document.querySelector("#brandSub"),
+  brandIcon: document.querySelector("#brandIcon"),
   sessionInfoSummary: document.querySelector("#sessionInfoSummary"),
   sessionInfoContent: document.querySelector("#sessionInfoContent"),
   toggleSessionInfoButton: document.querySelector("#toggleSessionInfoButton"),
@@ -54,6 +64,13 @@ const sourceOrder = [
   "bridge-lark",
   "bridge-coze",
   "subagent",
+  "cc-claude-desktop",
+  "cc-sdk-cli",
+  "cc-sdk-ts",
+  "cc-cli",
+  "cc-ide",
+  "cc-interactive",
+  "cc-unknown",
   "unknown"
 ];
 const sourceLabels = {
@@ -67,15 +84,23 @@ const sourceLabels = {
   unknown: "未识别入口",
   desktop: "Codex 客户端",
   cli: "Terminal / Codex CLI",
-  exec: "Terminal / codex exec"
+  exec: "Terminal / codex exec",
+  "cc-sdk-cli": "SDK / CLI",
+  "cc-sdk-ts": "SDK / TypeScript",
+  "cc-cli": "Claude CLI",
+  "cc-ide": "Claude IDE",
+  "cc-interactive": "交互式终端",
+  "cc-claude-desktop": "Claude 客户端",
+  "cc-unknown": "未识别入口"
 };
 
-const sceneOrder = ["lark", "obsidian", "coze", "skill", "terminal-project", "codex-project", "general"];
+const sceneOrder = ["lark", "obsidian", "coze", "skill", "sdk", "terminal-project", "codex-project", "general"];
 const sceneLabels = {
   lark: "飞书 / Lark",
   obsidian: "Obsidian 笔记",
   coze: "Coze / Bridge",
   skill: "Skill 工作流",
+  sdk: "SDK 接入",
   "terminal-project": "终端项目",
   "codex-project": "Codex 项目",
   general: "普通会话"
@@ -677,7 +702,7 @@ async function openStatsModal() {
   els.statsModalBody.innerHTML = `<div class="stats-loading">正在汇总本机会话...</div>`;
   els.statsSubtitle.textContent = "Token 消耗与 Skill 使用频率";
   try {
-    const response = await fetch("api/analytics");
+    const response = await fetch(`${apiBase()}/analytics`);
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || "统计载入失败");
     renderAnalytics(data);
@@ -916,7 +941,7 @@ async function selectSession(id) {
   els.detailBody.classList.remove("is-hidden");
   els.detailTitle.textContent = "正在载入会话...";
 
-  const response = await fetch(`api/sessions/${id}`);
+  const response = await fetch(`${apiBase()}/sessions/${id}`);
   const detail = await response.json();
   if (!response.ok) throw new Error(detail.error || "会话载入失败");
 
@@ -936,7 +961,7 @@ async function loadSessions() {
   els.refreshButton.disabled = true;
   els.refreshButton.textContent = "刷新中";
   try {
-    const response = await fetch("api/sessions");
+    const response = await fetch(`${apiBase()}/sessions`);
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || "会话列表载入失败");
     state.sessions = data.sessions;
@@ -970,6 +995,62 @@ async function loadSessions() {
   }
 }
 
+const modeConfig = {
+  codex: {
+    brandTitle: "Codex 会话管理器",
+    brandSub: "本机会话索引",
+    eyebrow: "本机 Codex 会话索引",
+    emptyHtml: "这个管理器只读本机 <code>~/.codex</code>，不会修改或归档任何会话。",
+    icon: "./assets/codex-icon.png"
+  },
+  claude: {
+    brandTitle: "Claude Code 会话管理器",
+    brandSub: "本机会话索引",
+    eyebrow: "本机 Claude Code 会话索引",
+    emptyHtml: "这个管理器只读本机 <code>~/.claude/projects</code>，不会修改或归档任何会话。",
+    icon: "./assets/claude-icon.png"
+  }
+};
+
+function applyModeChrome() {
+  const config = modeConfig[state.mode];
+  els.brandTitle.textContent = config.brandTitle;
+  els.brandSub.textContent = config.brandSub;
+  els.detailEyebrow.textContent = config.eyebrow;
+  els.emptyStateSub.innerHTML = config.emptyHtml;
+  els.brandIcon.src = config.icon;
+  document.body.dataset.tool = state.mode;
+}
+
+async function switchMode(mode) {
+  if (mode === state.mode) return;
+  state.mode = mode;
+  state.selectedId = null;
+  state.sessions = [];
+  state.filtered = [];
+  state.stats = null;
+  for (const btn of document.querySelectorAll(".tool-switch-btn")) {
+    btn.classList.toggle("is-active", btn.dataset.tool === mode);
+  }
+  applyModeChrome();
+  closeStatsModal();
+  els.detailBody.classList.add("is-hidden");
+  els.emptyState.classList.remove("is-hidden");
+  els.detailTitle.textContent = "选择一个会话";
+  els.copyButton.disabled = true;
+  await loadSessions().catch((error) => {
+    els.emptyState.innerHTML = `
+      <div class="empty-mark">!</div>
+      <h3>会话载入失败</h3>
+      <p>${escapeHtml(error.message)}</p>
+    `;
+  });
+}
+
+for (const btn of document.querySelectorAll(".tool-switch-btn")) {
+  btn.addEventListener("click", () => switchMode(btn.dataset.tool));
+}
+
 els.searchInput.addEventListener("input", applyFilters);
 els.sourceFilter.addEventListener("change", applyFilters);
 els.sceneFilter.addEventListener("change", applyFilters);
@@ -996,7 +1077,8 @@ els.expandTechnicalButton.addEventListener("click", () => setTechnicalCollapsed(
 els.copyButton.addEventListener("click", async () => {
   if (!state.selectedId) return;
   const session = state.sessions.find((item) => item.id === state.selectedId);
-  await navigator.clipboard.writeText(session?.resume_command || `codex resume ${state.selectedId} --all`);
+  const fallback = state.mode === "claude" ? `claude --resume ${state.selectedId}` : `codex resume ${state.selectedId} --all`;
+  await navigator.clipboard.writeText(session?.resume_command || fallback);
   els.copyButton.textContent = "已复制";
   setTimeout(() => {
     els.copyButton.textContent = "复制恢复命令";
@@ -1022,10 +1104,11 @@ for (const button of document.querySelectorAll(".segmented button")) {
   });
 }
 
+applyModeChrome();
 loadSessions().catch((error) => {
   els.emptyState.innerHTML = `
     <div class="empty-mark">!</div>
-    <h3>Codex 会话载入失败</h3>
+    <h3>会话载入失败</h3>
     <p>${escapeHtml(error.message)}</p>
   `;
 });

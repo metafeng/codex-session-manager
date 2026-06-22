@@ -3,19 +3,28 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Codex 会话管理器</title>
+    <title>Agent 会话管理器</title>
     <link rel="stylesheet" href="./styles.css" />
   </head>
   <body>
     <div class="app-shell">
       <aside class="sidebar">
+        <div class="tool-switcher" role="group" aria-label="工具切换">
+          <button class="tool-switch-btn is-active" data-tool="codex" type="button">
+            <span class="tool-switch-dot codex-dot"></span>Codex
+          </button>
+          <button class="tool-switch-btn" data-tool="claude" type="button">
+            <span class="tool-switch-dot claude-dot"></span>Claude Code
+          </button>
+        </div>
+
         <header class="brand">
-          <div class="mark" aria-hidden="true">
-            <img src="./assets/codex-icon.png" alt="" />
+          <div class="mark" aria-hidden="true" id="brandMark">
+            <img src="./assets/codex-icon.png" alt="" id="brandIcon" />
           </div>
           <div>
-            <h1>Codex 会话管理器</h1>
-            <p>本机会话索引</p>
+            <h1 id="brandTitle">Codex 会话管理器</h1>
+            <p id="brandSub">本机会话索引</p>
           </div>
           <button class="stats-button" id="statsButton" type="button">用量统计</button>
         </header>
@@ -93,7 +102,7 @@
       <main class="detail">
         <header class="topbar">
           <div>
-            <p class="eyebrow">本机 Codex 会话索引</p>
+            <p class="eyebrow" id="detailEyebrow">本机 Codex 会话索引</p>
             <h2 id="detailTitle">选择一个会话</h2>
           </div>
           <div class="actions">
@@ -105,7 +114,7 @@
         <section class="empty-state" id="emptyState">
           <div class="empty-mark">ID</div>
           <h3>选择一个会话查看来源和记录</h3>
-          <p>这个管理器只读本机 <code>~/.codex</code>，不会修改或归档任何会话。</p>
+          <p id="emptyStateSub">这个管理器只读本机 <code>~/.codex</code>，不会修改或归档任何会话。</p>
         </section>
 
         <section class="detail-body is-hidden" id="detailBody">
