@@ -743,7 +743,9 @@ function renderList() {
             <span class="pill ${providerClass}">${escapeHtml(item.model_provider || "服务商")}</span>
             <span class="pill">${escapeHtml(item.model || "模型")}</span>
             <span class="pill importance-pill importance-${escapeHtml(importance.level)}">${escapeHtml(importance.label)}</span>
-            ${item.archived ? `<span class="pill archive-pill">已归档</span>` : ""}
+            ${item.archived
+              ? `<span class="pill archive-pill archive-action" data-archive-id="${escapeHtml(item.id)}" data-archived="1" role="button" tabindex="0" title="取消归档">已归档 ✕</span>`
+              : `<span class="pill archive-action" data-archive-id="${escapeHtml(item.id)}" data-archived="0" role="button" tabindex="0" title="归档此会话">归档</span>`}
           </div>
         </button>
       `;
@@ -752,6 +754,37 @@ function renderList() {
 
   for (const button of els.sessionList.querySelectorAll(".session-card[data-id]")) {
     button.addEventListener("click", () => selectSession(button.dataset.id));
+  }
+
+  for (const action of els.sessionList.querySelectorAll(".archive-action")) {
+    action.addEventListener("click", (event) => {
+      event.stopPropagation();
+      toggleArchive(action.dataset.archiveId, action.dataset.archived !== "1");
+    });
+  }
+}
+
+function recomputeArchiveStats() {
+  if (!state.stats) return;
+  state.stats.active = state.sessions.filter((s) => !s.archived).length;
+  state.stats.archived = state.sessions.filter((s) => s.archived).length;
+}
+
+async function toggleArchive(id, archived) {
+  try {
+    const response = await fetch(`${apiBase()}/archive`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ id, archived })
+    });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const data = await response.json();
+    const item = state.sessions.find((s) => s.id === id);
+    if (item) item.archived = data.archived;
+    recomputeArchiveStats();
+    applyFilters();
+  } catch (error) {
+    window.alert(`归档操作失败：${error.message}`);
   }
 }
 

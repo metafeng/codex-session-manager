@@ -1,5 +1,5 @@
 import { createServer } from "node:http";
-import { readFile, access, readdir } from "node:fs/promises";
+import { readFile, writeFile, access, readdir, mkdir } from "node:fs/promises";
 import { createReadStream } from "node:fs";
 import { execFile } from "node:child_process";
 import { createInterface } from "node:readline";
@@ -35,6 +35,53 @@ function json(res, status, body) {
     "cache-control": "no-store"
   });
   res.end(JSON.stringify(body));
+}
+
+// ─── archive overlay ─────────────────────────────────────────────────────────
+// The manager never modifies ~/.codex or ~/.claude. Manual archive state is kept
+// as a thin overlay in its own JSON store and OR-ed onto each session's native
+// archived flag, so it is fully reversible and never touches original data.
+const archiveStoreDir = join(os.homedir(), ".agent-session-manager");
+const archiveStorePath = join(archiveStoreDir, "archive.json");
+let archiveCache = null;
+
+async function loadArchiveStore() {
+  if (archiveCache) return archiveCache;
+  try {
+    const data = JSON.parse(await readFile(archiveStorePath, "utf8"));
+    archiveCache = {
+      codex: new Set(Array.isArray(data.codex) ? data.codex : []),
+      claude: new Set(Array.isArray(data.claude) ? data.claude : [])
+    };
+  } catch {
+    archiveCache = { codex: new Set(), claude: new Set() };
+  }
+  return archiveCache;
+}
+
+async function setArchive(tool, id, archived) {
+  const store = await loadArchiveStore();
+  const set = store[tool] || (store[tool] = new Set());
+  if (archived) set.add(id);
+  else set.delete(id);
+  await mkdir(archiveStoreDir, { recursive: true });
+  await writeFile(
+    archiveStorePath,
+    JSON.stringify({ codex: [...store.codex], claude: [...store.claude] }, null, 2)
+  );
+  return Boolean(archived);
+}
+
+function readBody(req) {
+  return new Promise((resolve, reject) => {
+    let data = "";
+    req.on("data", (chunk) => {
+      data += chunk;
+      if (data.length > 1_000_000) req.destroy();
+    });
+    req.on("end", () => resolve(data));
+    req.on("error", reject);
+  });
 }
 
 function textFromContent(content) {
@@ -564,6 +611,7 @@ async function getSessions() {
     order by updated_at_ms desc`
   );
 
+  const overrides = await loadArchiveStore();
   return Promise.all(rows.map(async (row) => {
     const meta = await readSessionMeta(row.rollout_path);
     const originator = meta.originator || null;
@@ -597,7 +645,7 @@ async function getSessions() {
       preview: compactText(row.preview || row.title || "", 420),
       created_at: row.created_at_ms ? new Date(row.created_at_ms).toISOString() : null,
       updated_at: row.updated_at_ms ? new Date(row.updated_at_ms).toISOString() : null,
-      archived: Boolean(row.archived),
+      archived: Boolean(row.archived) || overrides.codex.has(row.id),
       has_user_event: Boolean(row.has_user_event),
       originator,
       source_key: entrySource.key,
@@ -1053,6 +1101,8 @@ async function getCCSessions() {
     return [];
   }
 
+  const overrides = await loadArchiveStore();
+
   for (const dirName of projectDirs) {
     const projectPath = join(claudeProjectsDir, dirName);
     let files = [];
@@ -1081,6 +1131,7 @@ async function getCCSessions() {
         });
         sessions.push({
           ...raw,
+          archived: Boolean(raw.archived) || overrides.claude.has(raw.id),
           source_key: entrySource.key,
           source_label: entrySource.label,
           scene_keys: sceneTags.map((t) => t.key),
@@ -1209,6 +1260,15 @@ async function handleCCApi(req, res, url) {
     }
   }
 
+  if (url.pathname === "/api/cc/archive" && req.method === "POST") {
+    let body;
+    try { body = JSON.parse((await readBody(req)) || "{}"); }
+    catch { return json(res, 400, { error: "Invalid JSON body" }); }
+    if (!body.id) return json(res, 400, { error: "Missing id" });
+    const archived = await setArchive("claude", String(body.id), Boolean(body.archived));
+    return json(res, 200, { id: body.id, archived });
+  }
+
   const detailMatch = url.pathname.match(/^\/api\/cc\/sessions\/([0-9a-f-]+)$/);
   if (detailMatch) {
     const id = detailMatch[1];
@@ -1292,6 +1352,15 @@ async function handleApi(req, res, url) {
     } catch (error) {
       return json(res, 500, { error: error.message || "Analytics failed" });
     }
+  }
+
+  if (url.pathname === "/api/archive" && req.method === "POST") {
+    let body;
+    try { body = JSON.parse((await readBody(req)) || "{}"); }
+    catch { return json(res, 400, { error: "Invalid JSON body" }); }
+    if (!body.id) return json(res, 400, { error: "Missing id" });
+    const archived = await setArchive("codex", String(body.id), Boolean(body.archived));
+    return json(res, 200, { id: body.id, archived });
   }
 
   const detailMatch = url.pathname.match(/^\/api\/sessions\/([0-9a-f-]+)$/);

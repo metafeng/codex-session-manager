@@ -434,6 +434,22 @@ select:focus,
   color: var(--archive);
 }
 
+.archive-action {
+  cursor: pointer;
+  transition: all 0.12s ease;
+}
+
+.archive-action:not(.archive-pill) {
+  margin-left: auto;
+  color: var(--muted-2);
+}
+
+.archive-action:hover {
+  border-color: var(--archive);
+  background: #fff;
+  color: var(--archive);
+}
+
 .importance-pill {
   border-color: rgba(15, 107, 87, 0.18);
   background: #fff;
